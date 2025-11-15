@@ -3,42 +3,18 @@
 from typing import List, Optional
 from datetime import datetime
 from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi.responses import JSONResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 
 from app.core.database import get_db
 from app.db.models import DerivedMetric, MetricValue, Asset, Price
-from pydantic import BaseModel
 
 
 router = APIRouter()
 
 
-# Pydantic schemas
-class MetricResponse(BaseModel):
-    id: int
-    name: str
-    description: Optional[str] = None
-    computation_method: Optional[str] = None
-    metadata: Optional[dict] = None
-
-    class Config:
-        from_attributes = True
-
-
-class MetricValueResponse(BaseModel):
-    id: int
-    metric_id: int
-    timestamp: datetime
-    value: float
-    computation_notes: Optional[str] = None
-    metadata: Optional[dict] = None
-
-    class Config:
-        from_attributes = True
-
-
-@router.get("/", response_model=List[MetricResponse])
+@router.get("/")
 async def list_metrics(
     skip: int = 0,
     limit: int = 100,
@@ -48,7 +24,18 @@ async def list_metrics(
     query = select(DerivedMetric).offset(skip).limit(limit)
     result = await db.execute(query)
     metrics = result.scalars().all()
-    return metrics
+
+    # Return as JSONResponse to bypass Pydantic validation
+    data = [
+        {
+            "id": m.id,
+            "name": m.name,
+            "description": m.description,
+            "computation_method": m.computation_method,
+        }
+        for m in metrics
+    ]
+    return JSONResponse(content=data)
 
 
 @router.get("/{metric_name}/values")
@@ -82,8 +69,8 @@ async def get_metric_values(
     result = await db.execute(query)
     values = result.scalars().all()
 
-    # Return as plain dict to avoid Pydantic serialization issues
-    return {
+    # Return as JSONResponse to bypass Pydantic serialization issues
+    data = {
         "values": [
             {
                 "id": v.id,
@@ -94,10 +81,14 @@ async def get_metric_values(
             for v in values
         ]
     }
+    return JSONResponse(content=data)
 
 
-@router.get("/{metric_name}/latest", response_model=MetricValueResponse)
-async def get_latest_metric_value(metric_name: str, db: AsyncSession = Depends(get_db)):
+@router.get("/{metric_name}/latest")
+async def get_latest_metric_value(
+    metric_name: str,
+    db: AsyncSession = Depends(get_db)
+):
     """Get the most recent value for a metric."""
     # Get metric by name
     metric_result = await db.execute(
@@ -122,7 +113,14 @@ async def get_latest_metric_value(metric_name: str, db: AsyncSession = Depends(g
     if not value:
         raise HTTPException(status_code=404, detail=f"No values for metric {metric_name}")
 
-    return value
+    # Return as JSONResponse to bypass Pydantic validation
+    data = {
+        "id": value.id,
+        "metric_id": value.metric_id,
+        "timestamp": value.timestamp.isoformat(),
+        "value": float(value.value) if value.value else None,
+    }
+    return JSONResponse(content=data)
 
 
 @router.get("/gsr/current")
@@ -187,7 +185,7 @@ async def get_current_gsr(db: AsyncSession = Depends(get_db)):
 
     # TODO: Calculate percentile and z-score from historical data
     # For now, returning basic GSR value with gold/silver prices
-    return {
+    data = {
         "gsr": round(value.value, 2),
         "percentile": None,  # TODO: Calculate from historical data
         "z_score": None,  # TODO: Calculate from historical data
@@ -195,8 +193,9 @@ async def get_current_gsr(db: AsyncSession = Depends(get_db)):
         "std": None,  # TODO: Calculate from historical data
         "gold_price": round(gold_price, 2) if gold_price else None,
         "silver_price": round(silver_price, 2) if silver_price else None,
-        "timestamp": value.timestamp,
+        "timestamp": value.timestamp.isoformat(),
     }
+    return JSONResponse(content=data)
 
 
 @router.get("/{metric_name}/data")
@@ -232,8 +231,8 @@ async def get_metric_data(
     result = await db.execute(query)
     values = result.scalars().all()
 
-    # Return raw dict data
-    return {
+    # Return as JSONResponse to bypass Pydantic validation
+    data = {
         "metric_name": metric.name,
         "values": [
             {
@@ -244,3 +243,4 @@ async def get_metric_data(
             for v in values
         ]
     }
+    return JSONResponse(content=data)
