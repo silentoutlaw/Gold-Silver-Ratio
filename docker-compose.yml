@@ -1,0 +1,121 @@
+version: '3.8'
+
+services:
+  # PostgreSQL + TimescaleDB
+  postgres:
+    image: timescale/timescaledb:latest-pg15
+    container_name: gsr-postgres
+    environment:
+      POSTGRES_DB: gsr_analytics
+      POSTGRES_USER: gsr_user
+      POSTGRES_PASSWORD: gsr_password
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U gsr_user -d gsr_analytics"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - gsr-network
+
+  # Redis (for caching and Celery)
+  redis:
+    image: redis:7-alpine
+    container_name: gsr-redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - gsr-network
+
+  # Backend API
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: gsr-backend
+    environment:
+      - DATABASE_URL=postgresql+asyncpg://gsr_user:gsr_password@postgres:5432/gsr_analytics
+      - REDIS_URL=redis://redis:6379/0
+      - CORS_ORIGINS=["*"]
+    env_file:
+      - ./backend/.env
+    ports:
+      - "8000:8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - gsr-network
+
+  # Worker for background jobs
+  worker:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: gsr-worker
+    environment:
+      - DATABASE_URL=postgresql+asyncpg://gsr_user:gsr_password@postgres:5432/gsr_analytics
+      - REDIS_URL=redis://redis:6379/0
+    env_file:
+      - ./backend/.env
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    command: python -m app.ingestion.scheduler
+    networks:
+      - gsr-network
+
+  # Frontend (Next.js)
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+      args:
+        - NEXT_PUBLIC_API_URL=http://192.168.99.124:8000/api/v1
+    container_name: gsr-frontend
+    environment:
+      - NEXT_PUBLIC_API_URL=http://192.168.99.124:8000/api/v1
+    ports:
+      - "3000:3000"
+    depends_on:
+      - backend
+    networks:
+      - gsr-network
+
+  # Nginx reverse proxy (commented out for now)
+  # nginx:
+  #   image: nginx:alpine
+  #   container_name: gsr-nginx
+  #   ports:
+  #     - "80:80"
+  #     - "443:443"
+  #   volumes:
+  #     - ./infra/nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+  #     - ./infra/nginx/ssl:/etc/nginx/ssl:ro
+  #   depends_on:
+  #     - frontend
+  #     - backend
+  #   networks:
+  #     - gsr-network
+
+volumes:
+  postgres_data:
+  redis_data:
+
+networks:
+  gsr-network:
+    driver: bridge

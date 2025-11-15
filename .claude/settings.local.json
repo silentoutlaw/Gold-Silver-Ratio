@@ -1,0 +1,21 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(dir:*)",
+      "Bash(ssh:*)",
+      "Bash(tar:*)",
+      "Bash(scp:*)",
+      "Bash(npm install)",
+      "Bash(curl:*)",
+      "Bash(sshpass:*)",
+      "Bash(python deploy.py:*)",
+      "Bash(pip install:*)",
+      "Bash(chmod:*)",
+      "Bash(git add:*)",
+      "Bash(git commit:*)",
+      "Bash(git config:*)"
+    ],
+    "deny": [],
+    "ask": []
+  }
+}
