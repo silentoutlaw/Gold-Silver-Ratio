@@ -5,70 +5,158 @@ import Link from 'next/link';
 import { metricsApi, GSRMetric } from '@/lib/api';
 import { AdvancedGSRChart, PriceChart } from '@/components/AdvancedCharts';
 
-// Generate sample historical data for demonstration
-function generateSampleData(currentGSR: number, currentGold: number, currentSilver: number) {
-  const days = 365;
-  const gsrData = [];
-  const goldData = [];
-  const silverData = [];
-
-  const gsrMean = 75;
-
-  for (let i = days; i >= 0; i--) {
-    const date = new Date();
-    date.setDate(date.getDate() - i);
-    const dateStr = date.toISOString().split('T')[0];
-
-    // Simulate GSR fluctuation
-    const gsrVariation = (Math.random() - 0.5) * 10 + (currentGSR - gsrMean) * (1 - i / days);
-    const gsr = Math.max(50, Math.min(100, gsrMean + gsrVariation));
-
-    // Simulate gold price (trending up)
-    const goldVariation = (Math.random() - 0.5) * 100;
-    const goldTrend = (currentGold - 3800) * (1 - i / days);
-    const gold = Math.max(3000, 3800 + goldTrend + goldVariation);
-
-    // Calculate silver from GSR
-    const silver = gold / gsr;
-
-    gsrData.push({ date: dateStr, value: parseFloat(gsr.toFixed(2)) });
-    goldData.push({ date: dateStr, value: parseFloat(gold.toFixed(2)) });
-    silverData.push({ date: dateStr, value: parseFloat(silver.toFixed(2)) });
-  }
-
-  return {
-    gsrData,
-    goldData,
-    silverData,
-  };
-}
-
 export default function AnalyticsPage() {
   const [gsr, setGSR] = useState<GSRMetric | null>(null);
   const [loading, setLoading] = useState(true);
   const [chartData, setChartData] = useState<any>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [autoRefreshAttempted, setAutoRefreshAttempted] = useState(false);
 
   useEffect(() => {
     async function fetchData() {
       try {
         setLoading(true);
+        setError(null);
+
+        // Fetch current GSR
         const gsrData = await metricsApi.getCurrentGSR();
         setGSR(gsrData);
 
-        // Generate sample data based on current values
-        if (gsrData.gsr && gsrData.gold_price && gsrData.silver_price) {
-          const data = generateSampleData(gsrData.gsr, gsrData.gold_price, gsrData.silver_price);
-          setChartData(data);
+        // Fetch real historical data from backend (Yahoo scraped data or API data)
+        const thirtyDaysAgo = new Date();
+        thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
+        const startDate = thirtyDaysAgo.toISOString(); // Full datetime format required by backend
+
+        try {
+          // Fetch metric data from backend using direct fetch (new working endpoint)
+          let gsrValues: any[] = [];
+          let goldValues: any[] = [];
+          let silverValues: any[] = [];
+
+          try {
+            const gsrResponse = await fetch(`http://192.168.99.124:8000/api/v1/metrics/GSR/data?start_date=${startDate}`);
+            if (gsrResponse.ok) {
+              const gsrData = await gsrResponse.json();
+              gsrValues = gsrData?.values || [];
+            }
+          } catch (e) {
+            console.warn('Failed to fetch GSR data', e);
+          }
+
+          try {
+            const goldResponse = await fetch(`http://192.168.99.124:8000/api/v1/metrics/gold_price/data?start_date=${startDate}`);
+            if (goldResponse.ok) {
+              const goldData = await goldResponse.json();
+              goldValues = goldData?.values || [];
+            }
+          } catch (e) {
+            console.warn('Failed to fetch gold price data', e);
+          }
+
+          try {
+            const silverResponse = await fetch(`http://192.168.99.124:8000/api/v1/metrics/silver_price/data?start_date=${startDate}`);
+            if (silverResponse.ok) {
+              const silverData = await silverResponse.json();
+              silverValues = silverData?.values || [];
+            }
+          } catch (e) {
+            console.warn('Failed to fetch silver price data', e);
+          }
+
+          // Format GSR data for charts
+          const gsrData_formatted = gsrValues.map((item: any) => ({
+            date: item.timestamp ? item.timestamp.split('T')[0] : item.date,
+            value: parseFloat(item.value?.toFixed(2) || item.gsr?.toFixed(2) || 0),
+          }));
+
+          // Format gold price data for charts
+          const goldData_formatted = goldValues.map((item: any) => ({
+            date: item.timestamp ? item.timestamp.split('T')[0] : item.date,
+            value: parseFloat(item.value?.toFixed(2) || 0),
+          }));
+
+          // Format silver price data for charts
+          const silverData_formatted = silverValues.map((item: any) => ({
+            date: item.timestamp ? item.timestamp.split('T')[0] : item.date,
+            value: parseFloat(item.value?.toFixed(2) || 0),
+          }));
+
+          // Use real data if available
+          if (gsrData_formatted.length > 0 || goldData_formatted.length > 0 || silverData_formatted.length > 0) {
+            setChartData({
+              gsrData: gsrData_formatted,
+              goldData: goldData_formatted,
+              silverData: silverData_formatted,
+            });
+            setError(null);
+          } else {
+            // No data - try auto-refresh if we haven't already
+            if (!autoRefreshAttempted) {
+              console.log('No historical data found. Attempting auto-refresh from data sources...');
+              setAutoRefreshAttempted(true);
+
+              try {
+                // Auto-trigger data refresh from all enabled sources
+                const response = await fetch('http://192.168.99.124:8000/api/v1/config/ingest-data', {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({ days_back: 30 }),
+                });
+
+                if (response.ok) {
+                  // Compute metrics after ingestion
+                  await fetch('http://192.168.99.124:8000/api/v1/config/compute-metrics', {
+                    method: 'POST',
+                  });
+
+                  // Retry fetching data after refresh
+                  setTimeout(() => fetchData(), 2000);
+                  return;
+                }
+              } catch (refreshErr) {
+                console.error('Auto-refresh failed:', refreshErr);
+              }
+            }
+
+            setError('No historical data available. Make sure at least one data source (Yahoo Finance or API) is enabled in Settings and refreshing will start automatically.');
+          }
+        } catch (apiErr) {
+          console.error('Error fetching historical data from API:', apiErr);
+
+          if (!autoRefreshAttempted) {
+            setAutoRefreshAttempted(true);
+            console.log('Attempting auto-refresh due to API error...');
+
+            try {
+              await fetch('http://192.168.99.124:8000/api/v1/config/ingest-data', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ days_back: 30 }),
+              });
+
+              await fetch('http://192.168.99.124:8000/api/v1/config/compute-metrics', {
+                method: 'POST',
+              });
+
+              setTimeout(() => fetchData(), 2000);
+              return;
+            } catch (e) {
+              console.error('Auto-refresh failed:', e);
+            }
+          }
+
+          setError('Unable to load data. Please check that data sources are enabled in Settings.');
         }
       } catch (err) {
-        console.error('Error fetching data:', err);
+        console.error('Error fetching analytics data:', err);
+        setError('Failed to load analytics. Please refresh the page.');
       } finally {
         setLoading(false);
       }
     }
 
     fetchData();
-  }, []);
+  }, [autoRefreshAttempted]);
 
   if (loading) {
     return (
@@ -77,7 +165,10 @@ export default function AnalyticsPage() {
           <div className="text-center">
             <div className="animate-pulse">
               <div className="h-8 bg-gray-300 dark:bg-gray-700 rounded w-64 mx-auto mb-4"></div>
-              <div className="h-4 bg-gray-300 dark:bg-gray-700 rounded w-96 mx-auto"></div>
+              <div className="h-4 bg-gray-300 dark:bg-gray-700 rounded w-96 mx-auto mb-4"></div>
+              <p className="text-gray-600 dark:text-gray-400 text-sm">
+                {autoRefreshAttempted ? 'Loading real market data...' : 'Fetching analytics data...'}
+              </p>
             </div>
           </div>
         </div>
@@ -139,21 +230,38 @@ export default function AnalyticsPage() {
           </div>
         </div>
 
-        {/* Advanced Charts */}
-        {chartData && (
+        {/* Error Message */}
+        {error && (
+          <div className="mb-8 bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 rounded-xl p-6">
+            <p className="text-amber-800 dark:text-amber-200 font-medium mb-2">Data Loading Status</p>
+            <p className="text-amber-700 dark:text-amber-300 text-sm mb-3">{error}</p>
+            <p className="text-amber-600 dark:text-amber-400 text-xs mb-3">
+              The system is attempting to load real market data. This may take a few moments.
+            </p>
+            <button
+              onClick={() => window.location.reload()}
+              className="text-amber-600 dark:text-amber-400 hover:underline text-sm font-semibold"
+            >
+              ↻ Refresh Page
+            </button>
+          </div>
+        )}
+
+        {/* Advanced Charts - Only show if we have real data */}
+        {chartData && !error && (
           <div className="space-y-8">
             {/* Main GSR Chart */}
-            <AdvancedGSRChart data={chartData.gsrData} title="Gold-Silver Ratio (GSR)" />
+            <AdvancedGSRChart data={chartData.gsrData} title="Gold-Silver Ratio (GSR) - Real Data" />
 
             {/* Price Charts */}
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
               <PriceChart
-                title="Gold Price (USD/oz)"
+                title="Gold Price (USD/oz) - Real Data"
                 data={chartData.goldData}
                 dataKey="value"
               />
               <PriceChart
-                title="Silver Price (USD/oz)"
+                title="Silver Price (USD/oz) - Real Data"
                 data={chartData.silverData}
                 dataKey="value"
               />
@@ -245,7 +353,10 @@ export default function AnalyticsPage() {
         {/* Footer */}
         <footer className="mt-12 text-center text-gray-500 dark:text-gray-400 text-sm">
           <p>
-            GSR Analytics v1.1 | Charts display real data with interactive controls. For educational purposes only.
+            GSR Analytics v1.1 | Charts display real market data from Yahoo Finance or configured API sources.
+            {!chartData && !error && ' Loading data...'}
+            {error && ' Refresh data from Settings to display real data.'}
+            For educational purposes only.
           </p>
         </footer>
       </div>

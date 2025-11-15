@@ -185,3 +185,50 @@ async def get_current_gsr(db: AsyncSession = Depends(get_db)):
         "silver_price": round(silver_price, 2) if silver_price else None,
         "timestamp": value.timestamp,
     }
+
+
+@router.get("/{metric_name}/data")
+async def get_metric_data(
+    metric_name: str,
+    start_date: Optional[datetime] = None,
+    end_date: Optional[datetime] = None,
+    limit: int = Query(default=1000, le=10000),
+    db: AsyncSession = Depends(get_db),
+):
+    """Get metric data as JSON (bypasses Pydantic serialization issues)."""
+    # Case-insensitive metric lookup
+    metric_result = await db.execute(
+        select(DerivedMetric).where(
+            DerivedMetric.name.ilike(metric_name)
+        )
+    )
+    metric = metric_result.scalar_one_or_none()
+
+    if not metric:
+        raise HTTPException(status_code=404, detail=f"Metric {metric_name} not found")
+
+    # Build query for metric values
+    query = select(MetricValue).where(MetricValue.metric_id == metric.id)
+
+    if start_date:
+        query = query.where(MetricValue.timestamp >= start_date)
+    if end_date:
+        query = query.where(MetricValue.timestamp <= end_date)
+
+    query = query.order_by(MetricValue.timestamp.asc()).limit(limit)
+
+    result = await db.execute(query)
+    values = result.scalars().all()
+
+    # Return raw dict data
+    return {
+        "metric_name": metric.name,
+        "values": [
+            {
+                "id": v.id,
+                "timestamp": v.timestamp.isoformat(),
+                "value": float(v.value) if v.value else None,
+            }
+            for v in values
+        ]
+    }
