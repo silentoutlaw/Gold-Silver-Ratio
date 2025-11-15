@@ -386,7 +386,6 @@ docker-compose exec backend python -m app.scripts.test_ai_providers
 
 ## 📄 License
 
-[Add your license here]
 
 ## 🤝 Contributing
 

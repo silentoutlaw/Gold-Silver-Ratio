@@ -21,7 +21,12 @@
       "Bash(cmdkey /delete:git:https://github.com)",
       "Bash(timeout 10 git push:*)",
       "Bash(git pull:*)",
-      "Bash(git checkout:*)"
+      "Bash(git checkout:*)",
+      "Bash(backend/ frontend/ docker-compose.yml CLAUDE.md README.md)",
+      "Bash(backend/ frontend/ docker-compose.yml)",
+      "Bash(docker compose:*)",
+      "Bash(find:*)",
+      "Bash(python3:*)"
     ],
     "deny": [],
     "ask": []
