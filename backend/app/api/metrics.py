@@ -51,7 +51,7 @@ async def list_metrics(
     return metrics
 
 
-@router.get("/{metric_name}/values", response_model=List[MetricValueResponse])
+@router.get("/{metric_name}/values")
 async def get_metric_values(
     metric_name: str,
     start_date: Optional[datetime] = None,
@@ -59,10 +59,10 @@ async def get_metric_values(
     limit: int = Query(default=1000, le=10000),
     db: AsyncSession = Depends(get_db),
 ):
-    """Get time series values for a specific metric."""
-    # Get metric by name
+    """Get time series values for a specific metric (case-insensitive)."""
+    # Get metric by name (case-insensitive)
     metric_result = await db.execute(
-        select(DerivedMetric).where(DerivedMetric.name == metric_name)
+        select(DerivedMetric).where(DerivedMetric.name.ilike(metric_name))
     )
     metric = metric_result.scalar_one_or_none()
 
@@ -77,11 +77,23 @@ async def get_metric_values(
     if end_date:
         query = query.where(MetricValue.timestamp <= end_date)
 
-    query = query.order_by(MetricValue.timestamp.desc()).limit(limit)
+    query = query.order_by(MetricValue.timestamp.asc()).limit(limit)
 
     result = await db.execute(query)
     values = result.scalars().all()
-    return values
+
+    # Return as plain dict to avoid Pydantic serialization issues
+    return {
+        "values": [
+            {
+                "id": v.id,
+                "metric_id": v.metric_id,
+                "timestamp": v.timestamp.isoformat(),
+                "value": float(v.value) if v.value else None,
+            }
+            for v in values
+        ]
+    }
 
 
 @router.get("/{metric_name}/latest", response_model=MetricValueResponse)

@@ -34,7 +34,7 @@ export default function AnalyticsPage() {
           let silverValues: any[] = [];
 
           try {
-            const gsrResponse = await fetch(`http://192.168.99.124:8000/api/v1/metrics/GSR/data?start_date=${startDate}`);
+            const gsrResponse = await fetch(`http://192.168.99.124:8000/api/v1/metrics/gsr/values?start_date=${startDate}`);
             if (gsrResponse.ok) {
               const gsrData = await gsrResponse.json();
               gsrValues = gsrData?.values || [];
@@ -44,7 +44,7 @@ export default function AnalyticsPage() {
           }
 
           try {
-            const goldResponse = await fetch(`http://192.168.99.124:8000/api/v1/metrics/gold_price/data?start_date=${startDate}`);
+            const goldResponse = await fetch(`http://192.168.99.124:8000/api/v1/metrics/gold_price/values?start_date=${startDate}`);
             if (goldResponse.ok) {
               const goldData = await goldResponse.json();
               goldValues = goldData?.values || [];
@@ -54,7 +54,7 @@ export default function AnalyticsPage() {
           }
 
           try {
-            const silverResponse = await fetch(`http://192.168.99.124:8000/api/v1/metrics/silver_price/data?start_date=${startDate}`);
+            const silverResponse = await fetch(`http://192.168.99.124:8000/api/v1/metrics/silver_price/values?start_date=${startDate}`);
             if (silverResponse.ok) {
               const silverData = await silverResponse.json();
               silverValues = silverData?.values || [];
